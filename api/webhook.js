@@ -14,8 +14,10 @@ bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     const links = text.match(URL_REGEX);
 
-    // Если ссылок нет - игнорируем сообщение
-    if (!links) return;
+    // Если ссылок нет - сообщаем пользователю, что мы ждем ссылку
+    if (!links) {
+        return ctx.reply('Отправь мне ссылку на Google Maps (например, https://maps.app.goo.gl/...), и я превращу её в ссылку для Waze!');
+    }
 
     for (const shortLink of links) {
         try {
