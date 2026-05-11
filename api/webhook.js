@@ -23,9 +23,10 @@ bot.on('text', async (ctx) => {
         try {
             // Делаем запрос. Axios по умолчанию идет по редиректам.
             // Добавляем заголовки, чтобы Google не отдавал дефолтную страницу для ботов (с координатами сервера Vercel в США)
+            // TelegramBot - идеальный User-Agent, Google отдает ему чистую разметку без анти-бот проверок
             const response = await axios.get(shortLink, {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'TelegramBot (like TwitterBot)',
                     'Accept-Language': 'en-US,en;q=0.9'
                 }
             });
@@ -47,12 +48,19 @@ bot.on('text', async (ctx) => {
                     lat = match[1];
                     lon = match[2];
                 } else if (response.data && typeof response.data === 'string') {
-                    // Самый жесткий фоллбэк: ищем координаты прямо в HTML коде страницы, 
-                    // куда редиректит гугл (например, если это ссылка на кастомный поисковый запрос)
-                    const htmlMatch = response.data.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
-                    if (htmlMatch) {
-                        lat = htmlMatch[1];
-                        lon = htmlMatch[2];
+                    // Самый жесткий фоллбэк: ищем координаты прямо в HTML коде страницы.
+                    // Ищем в массиве APP_INITIALIZATION_STATE (формат: [zoom, lon, lat])
+                    const initMatch = response.data.match(/\[\[\[\d+(?:\.\d+)?,(-?\d+\.\d+),(-?\d+\.\d+)\]/);
+                    if (initMatch) {
+                        lon = initMatch[1];
+                        lat = initMatch[2];
+                    } else {
+                        // Если и там нет, ищем в meta тегах center=lat,lon
+                        const htmlMatch = response.data.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
+                        if (htmlMatch) {
+                            lat = htmlMatch[1];
+                            lon = htmlMatch[2];
+                        }
                     }
                 }
             }
