@@ -7,8 +7,8 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 // Регулярка для поиска коротких ссылок Google Maps в тексте
 const URL_REGEX = /(https:\/\/maps\.app\.goo\.gl\/[a-zA-Z0-9]+)/g;
 
-// Регулярка для вытаскивания координат из финальной длинной ссылки
-const COORDS_REGEX = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
+// Регулярка для вытаскивания координат из финальной длинной ссылки (поддерживает разные форматы)
+const COORDS_REGEX = /@?(-?\d+\.\d+)[,%20\+]+(-?\d+\.\d+)/;
 
 bot.on('text', async (ctx) => {
     const text = ctx.message.text;
