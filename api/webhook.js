@@ -41,6 +41,14 @@ bot.on('text', async (ctx) => {
                 if (match) {
                     lat = match[1];
                     lon = match[2];
+                } else if (response.data && typeof response.data === 'string') {
+                    // Самый жесткий фоллбэк: ищем координаты прямо в HTML коде страницы, 
+                    // куда редиректит гугл (например, если это ссылка на кастомный поисковый запрос)
+                    const htmlMatch = response.data.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
+                    if (htmlMatch) {
+                        lat = htmlMatch[1];
+                        lon = htmlMatch[2];
+                    }
                 }
             }
             
