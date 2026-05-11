@@ -1,0 +1,11 @@
+{
+  "name": "waze-converter-bot",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node api/webhook.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.15.0",
+    "axios": "^1.6.0"
+  }
+}
