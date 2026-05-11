@@ -22,25 +22,47 @@ bot.on('text', async (ctx) => {
     for (const shortLink of links) {
         try {
             // Делаем запрос. Axios по умолчанию идет по редиректам.
-            // Нам нужен именно финальный URL, куда нас перекинуло.
             const response = await axios.get(shortLink);
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
 
-            // Сначала ищем точные координаты маркера (!3d... !4d...)
-            // Это решает проблему, когда @ указывает на центр экрана, а не на сам маркер заведения
+            // 1. Ищем точные координаты маркера (!3d... !4d...)
             const markerMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
             
             if (markerMatch) {
                 lat = markerMatch[1];
                 lon = markerMatch[2];
             } else {
-                // Если точного маркера нет, используем фоллбэк: ищем координаты центра экрана или поиска
+                // 2. Фоллбэк: ищем координаты центра экрана
                 const match = finalUrl.match(COORDS_REGEX);
                 if (match) {
                     lat = match[1];
                     lon = match[2];
+                }
+            }
+            
+            // 3. Если координаты не найдены в URL, пробуем вытащить поисковый запрос (q=...) и спросить Google Places API
+            if ((!lat || !lon) && process.env.GOOGLE_PLACES_API_KEY) {
+                const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
+                if (qMatch) {
+                    const query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
+                    try {
+                        const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
+                            params: {
+                                query: query,
+                                key: process.env.GOOGLE_PLACES_API_KEY
+                            }
+                        });
+                        
+                        if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
+                            const location = apiRes.data.results[0].geometry.location;
+                            lat = location.lat;
+                            lon = location.lng;
+                        }
+                    } catch (apiError) {
+                        console.error("Ошибка API Google Places:", apiError.message);
+                    }
                 }
             }
             
