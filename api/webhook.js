@@ -1,16 +1,22 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
-// Берем токен из переменных окружения (настроим в Vercel)
+// Берем токен из переменных окружения
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Регулярка для поиска коротких ссылок Google Maps в тексте
 const URL_REGEX = /(https:\/\/maps\.app\.goo\.gl\/[a-zA-Z0-9]+)/g;
 
-// Регулярка для вытаскивания координат из финальной длинной ссылки (поддерживает разные форматы)
-const COORDS_REGEX = /@?(-?\d+\.\d+)[,%20\+]+(-?\d+\.\d+)/;
-
 bot.on('text', async (ctx) => {
+    // Проверка белого списка пользователей
+    const allowedIds = process.env.ALLOWED_USER_IDS ? process.env.ALLOWED_USER_IDS.split(',').map(id => id.trim()) : [];
+    const userId = ctx.message.from.id.toString();
+
+    // Если список задан, но пользователя в нем нет - игнорируем сообщение
+    if (allowedIds.length > 0 && !allowedIds.includes(userId)) {
+        return;
+    }
+
     const text = ctx.message.text;
     const links = text.match(URL_REGEX);
 
@@ -26,44 +32,43 @@ bot.on('text', async (ctx) => {
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
+            let query = null;
 
-            // 1. Ищем точные координаты маркера (!3d... !4d...)
-            const markerMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-            
-            if (markerMatch) {
-                lat = markerMatch[1];
-                lon = markerMatch[2];
-            } else {
-                // 2. Фоллбэк: ищем координаты центра экрана
-                const match = finalUrl.match(COORDS_REGEX);
-                if (match) {
-                    lat = match[1];
-                    lon = match[2];
-                }
+            // Пытаемся вытащить поисковый запрос или название места из итогового URL
+            const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
+            const placeMatch = finalUrl.match(/\/place\/([^\/]+)/);
+            const searchMatch = finalUrl.match(/\/search\/([^\/]+)/);
+
+            if (qMatch) {
+                query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
+            } else if (placeMatch) {
+                query = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
+            } else if (searchMatch) {
+                query = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
             }
-            
-            // 3. Если координаты не найдены в URL, пробуем вытащить поисковый запрос (q=...) и спросить Google Places API
-            if ((!lat || !lon) && process.env.GOOGLE_PLACES_API_KEY) {
-                const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
-                if (qMatch) {
-                    const query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
-                    try {
-                        const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
-                            params: {
-                                query: query,
-                                key: process.env.GOOGLE_PLACES_API_KEY
-                            }
-                        });
-                        
-                        if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
-                            const location = apiRes.data.results[0].geometry.location;
-                            lat = location.lat;
-                            lon = location.lng;
+
+            // ВСЕГДА идем в Google Places API, если есть запрос и ключ
+            if (query && process.env.GOOGLE_PLACES_API_KEY) {
+                try {
+                    const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
+                        params: {
+                            query: query,
+                            key: process.env.GOOGLE_PLACES_API_KEY
                         }
-                    } catch (apiError) {
-                        console.error("Ошибка API Google Places:", apiError.message);
+                    });
+                    
+                    if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
+                        const location = apiRes.data.results[0].geometry.location;
+                        lat = location.lat;
+                        lon = location.lng;
+                    } else {
+                        console.error("Places API не нашел результатов или вернул статус:", apiRes.data.status);
                     }
+                } catch (apiError) {
+                    console.error("Ошибка API Google Places:", apiError.message);
                 }
+            } else if (!process.env.GOOGLE_PLACES_API_KEY) {
+                console.error("ВНИМАНИЕ: Не задан GOOGLE_PLACES_API_KEY");
             }
             
             if (lat && lon) {
@@ -74,7 +79,7 @@ bot.on('text', async (ctx) => {
                     reply_to_message_id: ctx.message.message_id
                 });
             } else {
-                await ctx.reply(`К сожалению, этот формат ссылок Google Maps пока не поддерживается (не удалось извлечь точные координаты). Скорее всего, это ссылка на "Поиск", а не на конкретную точку.\n\nСсылка: ${shortLink}`, {
+                await ctx.reply(`К сожалению, не удалось получить координаты для этой ссылки через Google API.\n\nСсылка: ${shortLink}`, {
                     reply_to_message_id: ctx.message.message_id
                 });
             }
@@ -85,7 +90,7 @@ bot.on('text', async (ctx) => {
     }
 });
 
-// Экспортируем функцию для Vercel (чтобы он мог передать сюда вебхук)
+// Экспортируем функцию для Vercel
 module.exports = async (req, res) => {
     try {
         await bot.handleUpdate(req.body);
