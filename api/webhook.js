@@ -27,8 +27,13 @@ bot.on('text', async (ctx) => {
 
     for (const shortLink of links) {
         try {
-            // Делаем запрос. Axios по умолчанию идет по редиректам.
-            const response = await axios.get(shortLink);
+            // Делаем запрос. Добавляем заголовки TelegramBot, чтобы Google не блокировал Vercel IP
+            const response = await axios.get(shortLink, {
+                headers: {
+                    'User-Agent': 'TelegramBot (like TwitterBot)',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            });
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
