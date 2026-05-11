@@ -22,14 +22,8 @@ bot.on('text', async (ctx) => {
     for (const shortLink of links) {
         try {
             // Делаем запрос. Axios по умолчанию идет по редиректам.
-            // Добавляем заголовки, чтобы Google не отдавал дефолтную страницу для ботов (с координатами сервера Vercel в США)
-            // TelegramBot - идеальный User-Agent, Google отдает ему чистую разметку без анти-бот проверок
-            const response = await axios.get(shortLink, {
-                headers: {
-                    'User-Agent': 'TelegramBot (like TwitterBot)',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                }
-            });
+            // Нам нужен именно финальный URL, куда нас перекинуло.
+            const response = await axios.get(shortLink);
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
@@ -47,21 +41,6 @@ bot.on('text', async (ctx) => {
                 if (match) {
                     lat = match[1];
                     lon = match[2];
-                } else if (response.data && typeof response.data === 'string') {
-                    // Самый жесткий фоллбэк: ищем координаты прямо в HTML коде страницы.
-                    // Ищем в массиве APP_INITIALIZATION_STATE (формат: [zoom, lon, lat])
-                    const initMatch = response.data.match(/\[\[\[\d+(?:\.\d+)?,(-?\d+\.\d+),(-?\d+\.\d+)\]/);
-                    if (initMatch) {
-                        lon = initMatch[1];
-                        lat = initMatch[2];
-                    } else {
-                        // Если и там нет, ищем в meta тегах center=lat,lon
-                        const htmlMatch = response.data.match(/center=(-?\d+\.\d+)(?:%2C|,)(-?\d+\.\d+)/);
-                        if (htmlMatch) {
-                            lat = htmlMatch[1];
-                            lon = htmlMatch[2];
-                        }
-                    }
                 }
             }
             
@@ -73,7 +52,7 @@ bot.on('text', async (ctx) => {
                     reply_to_message_id: ctx.message.message_id
                 });
             } else {
-                await ctx.reply(`Не смог найти точные координаты по ссылке: ${shortLink}`, {
+                await ctx.reply(`К сожалению, этот формат ссылок Google Maps пока не поддерживается (не удалось извлечь точные координаты). Скорее всего, это ссылка на "Поиск", а не на конкретную точку.\n\nСсылка: ${shortLink}`, {
                     reply_to_message_id: ctx.message.message_id
                 });
             }
