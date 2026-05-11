@@ -2,18 +2,19 @@
 
 A simple, serverless Telegram bot that automatically converts short Google Maps links (like `maps.app.goo.gl`) into Waze navigation links. 
 
-Whenever a user sends a message containing a Google Maps link, the bot resolves the redirect, extracts the coordinates, and replies with a direct Waze URL ready for navigation.
+Whenever a user sends a message containing a Google Maps link, the bot resolves the redirect, extracts the precise coordinates, and replies with a direct Waze URL ready for navigation.
 
 ## Features
-- 🚀 **Serverless:** Designed to run on Vercel via Webhooks. Zero maintenance and zero cost.
+- 🚀 **Serverless:** Designed to run on Vercel via Webhooks. Zero maintenance and low/zero cost.
 - 🔗 **Auto-detection:** Finds Google Maps links anywhere in the text message.
-- 📍 **Precise:** Resolves the short link and extracts exact latitude and longitude coordinates.
+- 📍 **Hybrid Precision:** Extracts exact coordinates directly from the URL if available. For "blind" iOS links without coordinates, it automatically falls back to the **Google Places API** for 100% accuracy.
+- 🛡️ **Private Mode (Whitelist):** Can be configured to only respond to specific Telegram User IDs, ignoring everyone else.
 - ⚡ **Fast:** Responds instantly with a Waze navigation link.
 
 ## Prerequisites
 - A Telegram Bot Token (get it from [@BotFather](https://t.me/BotFather))
 - A [Vercel](https://vercel.com/) account (Free tier is perfect)
-- GitHub account
+- A Google Cloud account with the **Places API (New)** enabled and an API Key (Optional, but highly recommended for iOS link support).
 
 ## Deployment Guide
 
@@ -22,8 +23,9 @@ Whenever a user sends a message containing a Google Maps link, the bot resolves 
 2. Log in to Vercel and click **Add New... -> Project**.
 3. Import your repository.
 4. Before clicking Deploy, expand the **Environment Variables** section and add:
-   - **Name:** `BOT_TOKEN`
-   - **Value:** `your_telegram_bot_token_here`
+   - `BOT_TOKEN`: `your_telegram_bot_token_here` **(Required)**
+   - `GOOGLE_PLACES_API_KEY`: `your_google_cloud_api_key` *(Optional, used to resolve links that hide coordinates)*
+   - `ALLOWED_USER_IDS`: `123456789,987654321` *(Optional, comma-separated list of Telegram User IDs allowed to use the bot)*
 5. Click **Deploy**.
 6. Once deployed, note your Vercel project domain (e.g., `https://your-project.vercel.app`).
 
@@ -41,8 +43,11 @@ If successful, the browser will display: `{"ok":true,"result":true,"description"
 ## How it works
 1. **Telegram to Vercel:** When someone messages the bot, Telegram sends an HTTP POST request to the `/api/webhook` endpoint on Vercel.
 2. **Regex Matching:** The bot checks the message text for `maps.app.goo.gl` links.
-3. **Redirect Resolution:** It makes a GET request to the short link using `axios` to follow redirects and find the final, expanded Google Maps URL.
-4. **Coordinate Extraction:** It extracts the `@latitude,longitude` coordinates from the final URL.
+3. **Redirect Resolution:** It makes a GET request to the short link using `axios` to follow redirects and find the final, expanded Google Maps URL. It uses a specific User-Agent to prevent Google from serving default datacenter coordinates.
+4. **Coordinate Extraction:** 
+   - First, it looks for exact marker coordinates (`!3d` and `!4d`) in the URL.
+   - Second, it looks for map center coordinates (`@lat,lon`).
+   - Finally, if no coordinates are present, it extracts the search query from the URL and requests the exact location from the **Google Places API**.
 5. **Reply:** It constructs a `waze.com/ul?ll=LAT,LON&navigate=yes` URL and sends it back to the user.
 
 ## Built With
