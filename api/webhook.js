@@ -22,8 +22,13 @@ bot.on('text', async (ctx) => {
     for (const shortLink of links) {
         try {
             // Делаем запрос. Axios по умолчанию идет по редиректам.
-            // Нам нужен именно финальный URL, куда нас перекинуло.
-            const response = await axios.get(shortLink);
+            // Добавляем заголовки, чтобы Google не отдавал дефолтную страницу для ботов (с координатами сервера Vercel в США)
+            const response = await axios.get(shortLink, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            });
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
