@@ -32,42 +32,58 @@ bot.on('text', async (ctx) => {
             const finalUrl = response.request.res.responseUrl; 
 
             let lat, lon;
-            let query = null;
 
-            // Пытаемся вытащить поисковый запрос или название места из итогового URL
-            const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
-            const placeMatch = finalUrl.match(/\/place\/([^\/]+)/);
-            const searchMatch = finalUrl.match(/\/search\/([^\/]+)/);
-
-            if (qMatch) {
-                query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
-            } else if (placeMatch) {
-                query = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
-            } else if (searchMatch) {
-                query = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
+            // 1. Ищем точные координаты маркера (!3d... !4d...)
+            const markerMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+            
+            if (markerMatch) {
+                lat = markerMatch[1];
+                lon = markerMatch[2];
+            } else {
+                // 2. Фоллбэк: ищем координаты центра экрана
+                const match = finalUrl.match(COORDS_REGEX);
+                if (match) {
+                    lat = match[1];
+                    lon = match[2];
+                }
             }
 
-            // ВСЕГДА идем в Google Places API, если есть запрос и ключ
-            if (query && process.env.GOOGLE_PLACES_API_KEY) {
-                try {
-                    const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
-                        params: {
-                            query: query,
-                            key: process.env.GOOGLE_PLACES_API_KEY
-                        }
-                    });
-                    
-                    if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
-                        const location = apiRes.data.results[0].geometry.location;
-                        lat = location.lat;
-                        lon = location.lng;
-                    } else {
-                        console.error("Places API не нашел результатов или вернул статус:", apiRes.data.status);
-                    }
-                } catch (apiError) {
-                    console.error("Ошибка API Google Places:", apiError.message);
+            // 3. Если координаты не найдены в URL, пробуем вытащить поисковый запрос или название места из итогового URL и идем в API
+            if ((!lat || !lon) && process.env.GOOGLE_PLACES_API_KEY) {
+                let query = null;
+                const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
+                const placeMatch = finalUrl.match(/\/place\/([^\/]+)/);
+                const searchMatch = finalUrl.match(/\/search\/([^\/]+)/);
+
+                if (qMatch) {
+                    query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
+                } else if (placeMatch) {
+                    query = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
+                } else if (searchMatch) {
+                    query = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
                 }
-            } else if (!process.env.GOOGLE_PLACES_API_KEY) {
+
+                if (query) {
+                    try {
+                        const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
+                            params: {
+                                query: query,
+                                key: process.env.GOOGLE_PLACES_API_KEY
+                            }
+                        });
+                        
+                        if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
+                            const location = apiRes.data.results[0].geometry.location;
+                            lat = location.lat;
+                            lon = location.lng;
+                        } else {
+                            console.error("Places API не нашел результатов или вернул статус:", apiRes.data.status);
+                        }
+                    } catch (apiError) {
+                        console.error("Ошибка API Google Places:", apiError.message);
+                    }
+                }
+            } else if (!lat && !lon && !process.env.GOOGLE_PLACES_API_KEY) {
                 console.error("ВНИМАНИЕ: Не задан GOOGLE_PLACES_API_KEY");
             }
             
