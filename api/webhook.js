@@ -26,12 +26,25 @@ bot.on('text', async (ctx) => {
             const response = await axios.get(shortLink);
             const finalUrl = response.request.res.responseUrl; 
 
-            // Ищем координаты в итоговом URL
-            const match = finalUrl.match(COORDS_REGEX);
+            let lat, lon;
+
+            // Сначала ищем точные координаты маркера (!3d... !4d...)
+            // Это решает проблему, когда @ указывает на центр экрана, а не на сам маркер заведения
+            const markerMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
             
-            if (match) {
-                const lat = match[1];
-                const lon = match[2];
+            if (markerMatch) {
+                lat = markerMatch[1];
+                lon = markerMatch[2];
+            } else {
+                // Если точного маркера нет, используем фоллбэк: ищем координаты центра экрана или поиска
+                const match = finalUrl.match(COORDS_REGEX);
+                if (match) {
+                    lat = match[1];
+                    lon = match[2];
+                }
+            }
+            
+            if (lat && lon) {
                 // Собираем ссылку для Waze
                 const wazeLink = `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`;
                 
