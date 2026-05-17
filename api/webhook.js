@@ -57,6 +57,21 @@ bot.on('text', async (ctx) => {
                 }
             }
 
+            // 2.5 Extract from Open Graph image meta tag in the HTML
+            if (!lat || !lon) {
+                const html = response.data;
+                if (html && typeof html === 'string') {
+                    let metaMatch = html.match(/content="[^"]*?markers=(-?\d+\.\d+)%2C(-?\d+\.\d+)[^"]*?"/);
+                    if (!metaMatch) {
+                        metaMatch = html.match(/content="[^"]*?center=(-?\d+\.\d+)%2C(-?\d+\.\d+)[^"]*?"/);
+                    }
+                    if (metaMatch) {
+                        lat = metaMatch[1];
+                        lon = metaMatch[2];
+                    }
+                }
+            }
+
             // 3. If coordinates are not found in the URL, try to extract a search query or place name from the final URL and hit the API
             if ((!lat || !lon) && process.env.GOOGLE_PLACES_API_KEY) {
                 let query = null;
