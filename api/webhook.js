@@ -5,7 +5,17 @@ const { resolveMapsLink } = require('../lib/resolve');
 // Initialize the bot with the token from environment variables
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-const HELP_TEXT = 'Send me a Google Maps link (e.g., https://maps.app.goo.gl/...) or coordinates, and I will convert it into a Waze navigation link!';
+const HELP_TEXT = 'Пришлите ссылку из Google Maps (например, https://maps.app.goo.gl/...) или координаты, и я сделаю из неё ссылку для навигации в Waze!';
+
+// Where the coordinates came from (result.source from lib/resolve.js)
+const SOURCE_TEXT = {
+    'link': 'координаты из ссылки',
+    'place': 'точка места в Google Maps',
+    'marker': 'маркер Google Maps',
+    'message': 'координаты из вашего сообщения',
+    'search-result': 'первый результат поиска Google Maps',
+    'map-center': 'центр карты из ссылки'
+};
 
 function wazeLink({ lat, lon }) {
     return `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`;
@@ -18,18 +28,18 @@ function formatResult(result) {
     if (result.exact) {
         if (title) lines.push(`📍 ${title}`);
         if (result.address && result.address !== title) lines.push(result.address);
-        lines.push(`✅ Exact: ${result.source}`);
+        lines.push(`✅ Точно: ${SOURCE_TEXT[result.source]}`);
     } else {
-        lines.push('⚠️ APPROXIMATE, check before driving!');
-        if (result.source === 'name search') {
-            lines.push(`Couldn't read the exact point, found a place by name instead. It may be another branch or location.`);
-            if (result.query) lines.push(`Requested: ${result.query}`);
-            lines.push(`Found: ${[result.name, result.address].filter(Boolean).join(', ')}`);
+        lines.push('⚠️ ПРИБЛИЗИТЕЛЬНО, проверьте перед поездкой!');
+        if (result.source === 'name-search') {
+            lines.push('Не удалось получить точную точку, место найдено поиском по названию. Это может быть другой филиал или другое место.');
+            if (result.query) lines.push(`Искали: ${result.query}`);
+            lines.push(`Нашлось: ${[result.name, result.address].filter(Boolean).join(', ')}`);
         } else {
-            lines.push(`Only the ${result.source} is known, not the exact point.`);
-            if (title) lines.push(`Requested: ${title}`);
+            lines.push(`Известен только ${SOURCE_TEXT[result.source]}, а не точная точка.`);
+            if (title) lines.push(`Искали: ${title}`);
         }
-        lines.push(`Check on map: https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lon}`);
+        lines.push(`Проверить на карте: https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lon}`);
     }
 
     lines.push('', wazeLink(result));
@@ -37,9 +47,9 @@ function formatResult(result) {
 }
 
 function formatFailure(link, query) {
-    const lines = [`❌ Couldn't get coordinates for this link: ${link}`];
+    const lines = [`❌ Не удалось получить координаты по ссылке: ${link}`];
     if (query) {
-        lines.push('', `Waze search by name (not verified): https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`);
+        lines.push('', `Поиск в Waze по названию (не проверено): https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`);
     }
     return lines.join('\n');
 }
@@ -70,7 +80,7 @@ bot.on('message', async (ctx) => {
 
     if (links.length === 0) {
         if (textCoords) {
-            return reply(formatResult({ ...textCoords, exact: true, source: 'coordinates from your message' }));
+            return reply(formatResult({ ...textCoords, exact: true, source: 'message' }));
         }
         // If there are no links, politely inform the user what we expect
         return reply(HELP_TEXT);
@@ -85,7 +95,7 @@ bot.on('message', async (ctx) => {
         }
 
         if (result.lat === undefined && textCoords && links.length === 1) {
-            result = { ...textCoords, exact: true, source: 'coordinates from your message' };
+            result = { ...textCoords, exact: true, source: 'message' };
         }
 
         try {
