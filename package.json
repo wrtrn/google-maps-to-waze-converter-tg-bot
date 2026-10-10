@@ -2,7 +2,8 @@
   "name": "waze-converter-bot",
   "version": "1.0.0",
   "scripts": {
-    "start": "node api/webhook.js"
+    "start": "node api/webhook.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@googlemaps/google-maps-services-js": "^3.4.2",

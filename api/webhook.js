@@ -1,16 +1,50 @@
 const { Telegraf } = require('telegraf');
-const axios = require('axios');
+const { extractMapsLinks, extractCoordsFromText } = require('../lib/parse');
+const { resolveMapsLink } = require('../lib/resolve');
 
 // Initialize the bot with the token from environment variables
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Regular expression to find short Google Maps links in text
-const URL_REGEX = /(https:\/\/maps\.app\.goo\.gl\/[a-zA-Z0-9]+)/g;
+const HELP_TEXT = 'Send me a Google Maps link (e.g., https://maps.app.goo.gl/...) or coordinates, and I will convert it into a Waze navigation link!';
 
-// Regular expression to extract coordinates from the final long link (supports different formats)
-const COORDS_REGEX = /@?(-?\d+\.\d+)[,%20\+]+(-?\d+\.\d+)/;
+function wazeLink({ lat, lon }) {
+    return `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`;
+}
 
-bot.on('text', async (ctx) => {
+function formatResult(result) {
+    const lines = [];
+    const title = result.name || result.query;
+
+    if (result.exact) {
+        if (title) lines.push(`📍 ${title}`);
+        if (result.address && result.address !== title) lines.push(result.address);
+        lines.push(`✅ Exact: ${result.source}`);
+    } else {
+        lines.push('⚠️ APPROXIMATE, check before driving!');
+        if (result.source === 'name search') {
+            lines.push(`Couldn't read the exact point, found a place by name instead. It may be another branch or location.`);
+            if (result.query) lines.push(`Requested: ${result.query}`);
+            lines.push(`Found: ${[result.name, result.address].filter(Boolean).join(', ')}`);
+        } else {
+            lines.push(`Only the ${result.source} is known, not the exact point.`);
+            if (title) lines.push(`Requested: ${title}`);
+        }
+        lines.push(`Check on map: https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lon}`);
+    }
+
+    lines.push('', wazeLink(result));
+    return lines.join('\n');
+}
+
+function formatFailure(link, query) {
+    const lines = [`❌ Couldn't get coordinates for this link: ${link}`];
+    if (query) {
+        lines.push('', `Waze search by name (not verified): https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`);
+    }
+    return lines.join('\n');
+}
+
+bot.on('message', async (ctx) => {
     // Whitelist check
     const allowedIds = process.env.ALLOWED_USER_IDS ? process.env.ALLOWED_USER_IDS.split(',').map(id => id.trim()) : [];
     const userId = ctx.message.from.id.toString();
@@ -20,112 +54,44 @@ bot.on('text', async (ctx) => {
         return;
     }
 
-    const text = ctx.message.text;
-    const links = text.match(URL_REGEX);
+    // Links can also come in photo captions or hidden behind text (forwarded messages)
+    const text = ctx.message.text || ctx.message.caption;
+    if (!text) return;
+    const entities = ctx.message.entities || ctx.message.caption_entities || [];
 
-    // If there are no links, politely inform the user what we expect
-    if (!links) {
-        return ctx.reply('Send me a Google Maps link (e.g., https://maps.app.goo.gl/...), and I will convert it into a Waze navigation link!');
+    const links = extractMapsLinks(text, entities);
+    // Shared "dropped pins" come with coordinates in the text, e.g. 44°49'06.2"N 20°25'09.7"E
+    const textCoords = extractCoordsFromText(text);
+
+    const reply = (message) => ctx.reply(message, {
+        reply_parameters: { message_id: ctx.message.message_id, allow_sending_without_reply: true },
+        link_preview_options: { is_disabled: true }
+    });
+
+    if (links.length === 0) {
+        if (textCoords) {
+            return reply(formatResult({ ...textCoords, exact: true, source: 'coordinates from your message' }));
+        }
+        // If there are no links, politely inform the user what we expect
+        return reply(HELP_TEXT);
     }
 
-    for (const shortLink of links) {
+    for (const link of links) {
+        let result = {};
         try {
-            // Make the request. Axios follows redirects by default.
-            // Add TelegramBot headers so Google doesn't block the request from Vercel datacenter IPs.
-            const response = await axios.get(shortLink, {
-                headers: {
-                    'User-Agent': 'TelegramBot (like TwitterBot)',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                }
-            });
-            const finalUrl = response.request.res.responseUrl; 
-
-            let lat, lon;
-
-            // 1. Try to find exact marker coordinates (!3d... !4d...)
-            const markerMatch = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-            
-            if (markerMatch) {
-                lat = markerMatch[1];
-                lon = markerMatch[2];
-            } else {
-                // 2. Fallback: find map center coordinates
-                const match = finalUrl.match(COORDS_REGEX);
-                if (match) {
-                    lat = match[1];
-                    lon = match[2];
-                }
-            }
-
-            // 2.5 Extract from Open Graph image meta tag in the HTML
-            if (!lat || !lon) {
-                const html = response.data;
-                if (html && typeof html === 'string') {
-                    let metaMatch = html.match(/content="[^"]*?markers=(-?\d+\.\d+)%2C(-?\d+\.\d+)[^"]*?"/);
-                    if (!metaMatch) {
-                        metaMatch = html.match(/content="[^"]*?center=(-?\d+\.\d+)%2C(-?\d+\.\d+)[^"]*?"/);
-                    }
-                    if (metaMatch) {
-                        lat = metaMatch[1];
-                        lon = metaMatch[2];
-                    }
-                }
-            }
-
-            // 3. If coordinates are not found in the URL, try to extract a search query or place name from the final URL and hit the API
-            if ((!lat || !lon) && process.env.GOOGLE_PLACES_API_KEY) {
-                let query = null;
-                const qMatch = finalUrl.match(/[?&]q=([^&]+)/);
-                const placeMatch = finalUrl.match(/\/place\/([^\/]+)/);
-                const searchMatch = finalUrl.match(/\/search\/([^\/]+)/);
-
-                if (qMatch) {
-                    query = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
-                } else if (placeMatch) {
-                    query = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
-                } else if (searchMatch) {
-                    query = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
-                }
-
-                if (query) {
-                    try {
-                        const apiRes = await axios.get("https://maps.googleapis.com/maps/api/place/textsearch/json", {
-                            params: {
-                                query: query,
-                                key: process.env.GOOGLE_PLACES_API_KEY
-                            }
-                        });
-                        
-                        if (apiRes.data.status === 'OK' && apiRes.data.results.length > 0) {
-                            const location = apiRes.data.results[0].geometry.location;
-                            lat = location.lat;
-                            lon = location.lng;
-                        } else {
-                            console.error("Places API found no results or returned status:", apiRes.data.status);
-                        }
-                    } catch (apiError) {
-                        console.error("Google Places API error:", apiError.message);
-                    }
-                }
-            } else if (!lat && !lon && !process.env.GOOGLE_PLACES_API_KEY) {
-                console.error("WARNING: GOOGLE_PLACES_API_KEY is not set.");
-            }
-            
-            if (lat && lon) {
-                // Build the Waze link
-                const wazeLink = `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`;
-                
-                await ctx.reply(`Here is your Waze link:\n${wazeLink}`, {
-                    reply_to_message_id: ctx.message.message_id
-                });
-            } else {
-                await ctx.reply(`Unfortunately, I couldn't get the coordinates for this link. It might be a generic search link rather than a specific location.\n\nLink: ${shortLink}`, {
-                    reply_to_message_id: ctx.message.message_id
-                });
-            }
+            result = await resolveMapsLink(link);
         } catch (error) {
-            console.error("Error processing link:", shortLink, error.message);
-            await ctx.reply(`An error occurred while processing the link: ${shortLink}`);
+            console.error('Error processing link:', link, error.message);
+        }
+
+        if (result.lat === undefined && textCoords && links.length === 1) {
+            result = { ...textCoords, exact: true, source: 'coordinates from your message' };
+        }
+
+        try {
+            await reply(result.lat !== undefined ? formatResult(result) : formatFailure(link, result.query));
+        } catch (error) {
+            console.error('Failed to send reply:', error.message);
         }
     }
 });
@@ -134,9 +100,9 @@ bot.on('text', async (ctx) => {
 module.exports = async (req, res) => {
     try {
         await bot.handleUpdate(req.body);
-        res.status(200).send('OK');
     } catch (err) {
         console.error('Webhook error:', err);
-        res.status(500).send('Error');
     }
+    // Always acknowledge, otherwise Telegram keeps re-sending the same update and the bot replies again and again
+    res.status(200).send('OK');
 };
